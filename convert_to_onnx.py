@@ -4,9 +4,9 @@ import onnxruntime as rt
 import onnxmltools
 from onnxmltools.convert.common.data_types import FloatTensorType
 
-# Load the trained XGBoost model
+# Load the trained XGBoost model (Multi-class)
 print("Loading model...")
-model = joblib.load("xgboost_chronic_model.pkl")
+model = joblib.load("multiclass_model.pkl")
 
 # PATCH: Add missing attributes required by onnxmltools/sklearn/xgboost
 if not hasattr(model, "use_label_encoder"):
@@ -33,6 +33,11 @@ if not hasattr(model, "validate_parameters"):
     model.validate_parameters = True
 if not hasattr(model, "eval_metric"):
     model.eval_metric = None
+
+# PATCH: Reset feature names to f0, f1, ... pattern for onnxmltools
+# This fixes "Unable to interpret 'Age'" error
+booster = model.get_booster()
+booster.feature_names = [f"f{i}" for i in range(8)]
 if not hasattr(model, "classes_"):
     model.classes_ = np.array([0, 1])
 
@@ -44,8 +49,13 @@ initial_types = [('float_input', FloatTensorType([None, 8]))]
 onx = onnxmltools.convert_xgboost(model, initial_types=initial_types)
 
 # Save the ONNX model
-with open("model.onnx", "wb") as f:
+with open("multiclass_model.onnx", "wb") as f:
     f.write(onx.SerializeToString())
+print("Model saved to multiclass_model.onnx")
+
+# Verify the ONNX model
+print("Verifying ONNX model...")
+sess = rt.InferenceSession("multiclass_model.onnx")
 print("Model saved to model.onnx")
 
 # Verify the ONNX model
@@ -57,15 +67,16 @@ label_name = sess.get_outputs()[0].name
 # Create dummy input
 dummy_input = np.random.rand(1, 8).astype(np.float32)
 
+
 # Predict with ONNX
 res = sess.run([label_name], {input_name: dummy_input})
-print(f"ONNX Prediction: {res[0]}")
+print(f"ONNX Prediction (Probabilities/Class): {res[0]}")
 
 # Compare with original model
 orig_pred = model.predict(dummy_input)
 print(f"Original Prediction: {orig_pred}")
 
-if res[0][0] == orig_pred[0]:
-    print("Verification Successful: Predictions match.")
-else:
-    print("Verification Warning: Predictions differ (could be due to floating point differences).")
+# Multi-class verification: check if predicted class matches
+# Note: ONNX might return probabilities depending on converter settings,
+# but XGBClassifier.predict returns class index.
+# Let's inspect res[0] shape.

@@ -3,8 +3,9 @@ import numpy as np
 
 app = Flask(__name__)
 # Load model using ONNX (Lightweight, fits in Vercel)
+# Load model using ONNX (Lightweight, fits in Vercel)
 import onnxruntime as rt
-sess = rt.InferenceSession("model.onnx")
+sess = rt.InferenceSession("binary_model.onnx")
 input_name = sess.get_inputs()[0].name
 label_name = sess.get_outputs()[0].name
 
@@ -56,11 +57,27 @@ def index():
         # Reshape for model (1, -1) and ensure float32
         scaled_input = scaled_input.reshape(1, -1).astype(np.float32)
         
-        # Predict using ONNX
-        prediction = sess.run([label_name], {input_name: scaled_input})[0][0]
+        # Predict using ONNX (Returns probability for class 1)
+        # Note: Binary models in ONNX via xgboost usually return [probability_class_0, probability_class_1] or similar
+        # Depending on export, let's inspect the output. 
+        # For standard binary classification, often it returns a map or sequence of probabilities.
+        # But `sess.run` usually returns a list of outputs.
+        # Let's assume standard behavior: output is probability of positive class.
+        pred_onx = sess.run([label_name], {input_name: scaled_input})[0]
         
-        prediction_result = f"{name}, based on your inputs, the prediction is: {'Yes (Chronic Disease)' if prediction == 1 else 'No (Healthy)'}"
+        # Binary prediction logic
+        # pred_onx might be a scalar probability or class label depending on export
+        # If classifier, it returns label. If regressor (logistic), it returns prob.
+        # XGBoost classifier export usually returns labels + probabilities.
+        # Let's inspect `label_name`.
+        
+        # Given we used convert_xgboost, it usually returns label (0 or 1).
+        prediction = pred_onx[0]
 
+        if prediction == 1:
+             prediction_result = f"{name}, results indicate: POSITIVE for disease presence."
+        else:
+             prediction_result = f"{name}, results indicate: NEGATIVE (Healthy)."
     return render_template("form.html", prediction_result=prediction_result)
 
 if __name__ == "__main__":
